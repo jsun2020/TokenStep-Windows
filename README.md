@@ -10,6 +10,11 @@ in sync conceptually. **Kept in sync through macOS v0.1.4.**
 
 ## What's new (synced from macOS)
 
+- **0.1.7** — Share-card screenshot. The tray gains **复制今日截图** and
+  **保存今日截图…**: TokenStep renders a branded "今日" stats card (logo, step-ring,
+  今日完成 %, 消耗/本月均值, 累计/活跃/达标) and copies it to the clipboard or saves
+  it as a PNG, so you can share your AI step-count to the community. (`--screenshot
+  [path]` also available from the CLI.)
 - **0.1.5** — Refreshed brand icon (circular base, ring + 3×3 contribution-green
   token grid), carried into the portable .exe. Dashboard brought to parity with the
   macOS "今日" view: a today step-ring hero (today vs daily goal, completion %,
@@ -45,6 +50,8 @@ the same locations the agents already write to.
   day-by-day table. Opens in your browser.
 - **Settings dialog** — daily goal, refresh interval (manual / 1 / 5 / 15 min),
   and autostart-at-login.
+- **Share-card screenshot** — 复制今日截图 / 保存今日截图… render a branded "今日"
+  stats card (PNG) to the clipboard or a file, for sharing to the community.
 - **Autostart** — optional launch on login via the Windows Run registry key.
 - **Update check** — on launch (toggle: 启动时检查更新) and via the tray's
   *检查更新* item, it checks GitHub Releases and, if a newer version exists, shows

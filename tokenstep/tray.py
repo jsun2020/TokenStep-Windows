@@ -15,7 +15,7 @@ import pystray
 from pystray import Menu, MenuItem
 
 from . import __version__
-from . import autostart, collector, icon as icon_mod, paths, updater
+from . import autostart, collector, icon as icon_mod, paths, sharecard, updater
 from . import settings as settings_mod
 from .settings_ui import open_settings_dialog
 
@@ -103,6 +103,9 @@ class TokenStepTray:
             ),
             MenuItem("设置…", self._on_open_settings),
             Menu.SEPARATOR,
+            MenuItem("复制今日截图", self._on_copy_screenshot),
+            MenuItem("保存今日截图…", self._on_save_screenshot),
+            Menu.SEPARATOR,
             MenuItem(
                 lambda item: f"⬆ 有新版本 v{self.available_update['version']} · 打开下载页"
                 if self.available_update
@@ -155,6 +158,82 @@ class TokenStepTray:
         self._stop.set()
         self._wakeup.set()
         self.icon.stop()
+
+    # -- screenshot / share card ------------------------------------------
+
+    def _build_card(self):
+        with self._lock:
+            snapshot = self.snapshot
+            settings = self.settings
+        view = collector.build_dashboard_view(snapshot, settings)
+        return sharecard.render_share_card(snapshot, view)
+
+    def _on_copy_screenshot(self, icon=None, item=None) -> None:
+        def runner() -> None:
+            try:
+                ok = sharecard.copy_to_clipboard(self._build_card())
+                self._notify("今日截图已复制到剪贴板。" if ok else "复制失败，请改用“保存今日截图”。")
+            except Exception as exc:
+                collector.log_error(exc)
+                self._notify("生成截图失败，请稍后再试。")
+
+        threading.Thread(target=runner, daemon=True).start()
+
+    def _on_save_screenshot(self, icon=None, item=None) -> None:
+        def runner() -> None:
+            try:
+                img = self._build_card()
+            except Exception as exc:
+                collector.log_error(exc)
+                self._notify("生成截图失败，请稍后再试。")
+                return
+            path = self._ask_save_path(sharecard.default_filename("today"))
+            if not path:
+                return
+            try:
+                sharecard.save_card(img, path)
+                self._notify(f"已保存：{path}")
+                self._reveal(path)
+            except Exception as exc:
+                collector.log_error(exc)
+                self._notify("保存截图失败，请稍后再试。")
+
+        threading.Thread(target=runner, daemon=True).start()
+
+    @staticmethod
+    def _ask_save_path(default_name: str) -> str | None:
+        import os
+        import tkinter as tk
+        from tkinter import filedialog
+
+        pictures = os.path.join(os.path.expanduser("~"), "Pictures")
+        initial_dir = pictures if os.path.isdir(pictures) else os.path.expanduser("~")
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
+        path = filedialog.asksaveasfilename(
+            parent=root,
+            title="保存今日截图",
+            defaultextension=".png",
+            initialfile=default_name,
+            initialdir=initial_dir,
+            filetypes=[("PNG 图片", "*.png")],
+        )
+        root.destroy()
+        return path or None
+
+    @staticmethod
+    def _reveal(path: str) -> None:
+        import os
+        import subprocess
+
+        try:
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+        except Exception:
+            pass
 
     # -- updates -----------------------------------------------------------
 

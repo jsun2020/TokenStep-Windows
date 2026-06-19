@@ -31,9 +31,39 @@ def _collect_once() -> int:
     return 0
 
 
+def _screenshot_once() -> int:
+    import os
+
+    from tokenstep import collector, paths, sharecard, settings as settings_mod
+
+    settings = settings_mod.load()
+    collector.ensure_pricing_file()
+    data = collector.collect_all(settings)
+    collector.write_outputs(data, settings)
+    view = collector.build_dashboard_view(data, settings)
+    img = sharecard.render_share_card(data, view)
+
+    # Optional explicit path as the argument after --screenshot.
+    out = None
+    argv = sys.argv
+    if "--screenshot" in argv:
+        idx = argv.index("--screenshot")
+        if idx + 1 < len(argv) and not argv[idx + 1].startswith("-"):
+            out = argv[idx + 1]
+    if not out:
+        pictures = os.path.join(os.path.expanduser("~"), "Pictures")
+        base = pictures if os.path.isdir(pictures) else str(paths.ROOT)
+        out = os.path.join(base, sharecard.default_filename("today"))
+    sharecard.save_card(img, out)
+    print(f"screenshot saved: {out}")
+    return 0
+
+
 def main() -> int:
     if "--collect" in sys.argv or "print-summary" in sys.argv:
         return _collect_once()
+    if "--screenshot" in sys.argv:
+        return _screenshot_once()
     from tokenstep.tray import main as tray_main
 
     return tray_main()
