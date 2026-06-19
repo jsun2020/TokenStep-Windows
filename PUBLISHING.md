@@ -27,7 +27,19 @@ on the original repo offering to upstream / be linked.
 
 ## 2. Publish the portable build as a Release
 
-GitHub web UI → **Releases → Draft a new release**:
+**Automated (recommended):** once the repo is pushed, GitHub Actions
+(`.github/workflows/build-release.yml`) builds the exe and publishes the release
+automatically when you push a version tag — no local build/upload needed:
+
+```sh
+git tag v0.1.7
+git push origin v0.1.7
+```
+
+The workflow builds on `windows-latest`, attaches `TokenStep-<ver>-win64.zip`, and
+auto-generates release notes. (The tag must match the in-app version, e.g. `v0.1.7`.)
+
+**Manual fallback** — GitHub web UI → **Releases → Draft a new release**:
 
 - Tag: `v0.1.7`  (Target: `main`)
 - Title: `TokenStep for Windows 0.1.7`

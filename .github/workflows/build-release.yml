@@ -1,0 +1,56 @@
+name: Build & Release (Windows)
+
+# Build the portable exe on Windows. On a v* tag, also publish a GitHub Release
+# with the portable zip attached. Manual runs (workflow_dispatch) just upload the
+# zip as a build artifact for testing.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build portable exe + zip
+        shell: pwsh
+        run: .\build.ps1
+
+      - name: Show build output
+        shell: pwsh
+        run: Get-ChildItem dist
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TokenStep-win64
+          path: dist/TokenStep-*-win64.zip
+          if-no-files-found: error
+
+      - name: Publish release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $zip = (Get-ChildItem dist/TokenStep-*-win64.zip | Select-Object -First 1).FullName
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag "$zip" --clobber
+          } else {
+            gh release create $tag "$zip" --title "TokenStep for Windows $tag" --generate-notes
+          }
