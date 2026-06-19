@@ -17,3 +17,6 @@ Thumbs.db
 .DS_Store
 .idea/
 .vscode/
+
+# Local-only planning docs (not for the public repo)
+prd.md
