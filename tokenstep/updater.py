@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Update checking against GitHub Releases.
 
-Mirrors the macOS UpdateService check logic (same repo, same semver compare), but
-is **check-only** on Windows: it never silently downloads or installs an .exe. If
+Mirrors the macOS UpdateService check logic (semver compare against GitHub
+Releases) against this Windows port's own repo, but is **check-only** on Windows:
+it never silently downloads or installs an .exe. If
 a newer release exists it surfaces a notification and a link to the download page,
 leaving the actual install to the user. This is the safe Windows equivalent of the
 Mac auto-updater.
@@ -19,7 +20,8 @@ from typing import Any
 
 from . import __version__
 
-REPO = "Backtthefuture/TokenStep"
+# The Windows port's own repo, so update checks find Windows release assets.
+REPO = "jsun2020/TokenStep-Windows"
 LATEST_RELEASE_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{REPO}/releases"
 

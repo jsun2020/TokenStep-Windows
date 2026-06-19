@@ -6,7 +6,20 @@ toward a token goal, and keeps a local history dashboard.
 
 This is the Windows port of the macOS TokenStep menu-bar app. It reuses the same
 cross-platform collector logic and matches the same data format, so the two stay
-in sync conceptually. **Kept in sync through macOS v0.1.4.**
+in sync conceptually. **Kept in sync through macOS v0.1.7.**
+
+> **Credit & thanks:** This is a community **Windows port** of
+> [TokenStep](https://github.com/Backtthefuture/TokenStep) (macOS) by **AI产品黄叔
+> (Chaoqiang Huang)** — thank you for the original app and the "每天一个亿" idea 🙌
+> Licensed under MIT; the original copyright and license are retained. Not affiliated
+> with or endorsed by the original author.
+
+## Download
+
+Grab the latest **`TokenStep-<version>-win64.zip`** from
+[Releases](https://github.com/jsun2020/TokenStep-Windows/releases), unzip, and run
+`TokenStep.exe` — no install, no Python required. (The .exe is unsigned, so Windows
+SmartScreen may warn on first run: **More info → Run anyway**.)
 
 ## What's new (synced from macOS)
 
