@@ -1,0 +1,19 @@
+# Build artifacts
+dist/
+build/
+*.spec
+app.ico
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.eggs/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/

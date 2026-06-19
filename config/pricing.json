@@ -1,0 +1,28 @@
+{
+  "notes": "Rough local estimates only. Edit these numbers for bill-like cost tracking. The app reads %APPDATA%\\TokenStep\\config\\pricing.json at runtime (auto-created from this default on first run).",
+  "default_total_usd_per_1m": 1.0,
+  "tools": {
+    "Codex": { "total_usd_per_1m": 1.0 },
+    "Claude Code": { "total_usd_per_1m": 3.0 }
+  },
+  "models": {
+    "gpt-5.5": { "openai_input_usd_per_1m": 5.0, "openai_cached_input_usd_per_1m": 0.5, "openai_output_usd_per_1m": 30.0 },
+    "gpt-5.4": { "openai_input_usd_per_1m": 2.5, "openai_cached_input_usd_per_1m": 0.25, "openai_output_usd_per_1m": 15.0 },
+    "gpt-5": { "total_usd_per_1m": 1.0 },
+    "gpt-5-codex": { "total_usd_per_1m": 1.0 },
+    "claude-opus": {
+      "input_usd_per_1m": 15.0,
+      "output_usd_per_1m": 75.0,
+      "cache_creation_usd_per_1m": 18.75,
+      "cache_read_usd_per_1m": 1.5
+    },
+    "claude-sonnet": {
+      "input_usd_per_1m": 3.0,
+      "output_usd_per_1m": 15.0,
+      "cache_creation_usd_per_1m": 3.75,
+      "cache_read_usd_per_1m": 0.3
+    },
+    "glm": { "total_usd_per_1m": 0.2 },
+    "minimax": { "total_usd_per_1m": 0.2 }
+  }
+}
