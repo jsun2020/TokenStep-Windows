@@ -4,9 +4,13 @@ TokenStep turns your AI token usage into a daily "step ring" — like a step cou
 but for AI coding. It lives in the Windows **system tray**, shows today's progress
 toward a token goal, and keeps a local history dashboard.
 
+<p align="center">
+  <img src="TokenStep-screenshot.png" alt="TokenStep today share card: today's tokens vs daily goal, completion %, and cumulative / active / on-target stats" width="540">
+</p>
+
 This is the Windows port of the macOS TokenStep menu-bar app. It reuses the same
 cross-platform collector logic and matches the same data format, so the two stay
-in sync conceptually. **Kept in sync through macOS v0.1.7.**
+in sync conceptually. **Kept in sync through macOS v0.1.14.**
 
 > **Credit & thanks:** This is a community **Windows port** of
 > [TokenStep](https://github.com/Backtthefuture/TokenStep) (macOS) by **AI产品黄叔
@@ -23,6 +27,14 @@ SmartScreen may warn on first run: **More info → Run anyway**.)
 
 ## What's new (synced from macOS)
 
+- **0.1.14** — Synced with the macOS 0.1.8–0.1.14 line. The collector cache format
+  is bumped (a one-time re-parse on first launch), the settings file now round-trips
+  the macOS **theme** field for cross-platform compatibility, and the macOS
+  duplicate-instance guard (0.1.8) is already covered here by the Windows
+  single-instance mutex. *Platform differences, on purpose:* the macOS theme-color
+  palettes (ocean/violet/amber/graphite) are **not** ported — Windows keeps the green
+  brand identity — and the macOS **auto-install** updater is intentionally left out:
+  this port stays **check-only** and never downloads or installs an .exe for you.
 - **0.1.7** — Share-card screenshot. The tray gains **复制今日截图** and
   **保存今日截图…**: TokenStep renders a branded "今日" stats card (logo, step-ring,
   今日完成 %, 消耗/本月均值, 累计/活跃/达标) and copies it to the clipboard or saves

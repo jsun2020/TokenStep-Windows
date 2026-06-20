@@ -23,7 +23,9 @@ from typing import Any
 from . import paths
 
 # Bump when the cached record shape changes, to invalidate old caches.
-CACHE_VERSION = 1
+# v2 matches macOS 0.1.14 (CollectorCache.currentVersion = 2): forces a one-time
+# re-parse so cached numbers align with the current collector logic.
+CACHE_VERSION = 2
 
 # Green "step" identity, matching the macOS SwiftUI app
 # (tokenGreen / tokenGreenDark, GitHub-contribution greens).

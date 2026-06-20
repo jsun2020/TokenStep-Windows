@@ -16,6 +16,10 @@ DEFAULTS: dict[str, Any] = {
     "refresh_interval_seconds": 60,
     "history_days": 180,
     "timezone": "Asia/Shanghai",
+    # Theme palette id (mirrors the macOS 0.1.14 settings shape). The Windows
+    # port keeps the green brand identity; this field is round-tripped for
+    # cross-platform settings.json compatibility but only "green" is rendered.
+    "theme": "green",
     # Update checking (mirrors the macOS settings shape).
     "auto_update_enabled": True,
     "ask_before_downloading_updates": True,
@@ -24,6 +28,8 @@ DEFAULTS: dict[str, Any] = {
 }
 
 VALID_INTERVALS = {0, 60, 300, 900}
+# Theme ids the macOS app understands (0.1.11+). Windows only renders "green".
+VALID_THEMES = {"green", "ocean", "violet", "amber", "graphite"}
 _BOOL_KEYS = ("auto_update_enabled", "ask_before_downloading_updates", "require_verified_updates")
 
 
@@ -47,6 +53,8 @@ def normalize(raw: dict[str, Any] | None) -> dict[str, Any]:
         out["history_days"] = DEFAULTS["history_days"]
     if not isinstance(out["timezone"], str) or not out["timezone"]:
         out["timezone"] = DEFAULTS["timezone"]
+    if out.get("theme") not in VALID_THEMES:
+        out["theme"] = DEFAULTS["theme"]
     for key in _BOOL_KEYS:
         out[key] = bool(out[key])
     sv = out.get("skipped_update_version")
