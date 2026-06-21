@@ -842,7 +842,12 @@ def collect_all(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     if settings:
         configure_timezone(settings.get("timezone"))
     history_days = int((settings or {}).get("history_days", 180) or 180)
-    cutoff = source_file_cutoff(history_days)
+    # When the user opts to retain all history, scan every log (no cutoff) so
+    # cumulative totals stay all-time; otherwise skip logs older than the window.
+    if (settings or {}).get("retain_all_history"):
+        cutoff = None
+    else:
+        cutoff = source_file_cutoff(history_days)
     pricing = load_pricing()
     cache = load_cache()
     live_paths: set[str] = set()

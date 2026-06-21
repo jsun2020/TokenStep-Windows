@@ -225,6 +225,62 @@ def test_date_from_epoch_variants() -> None:
     assert collector.date_from_epoch("1700000000") == secs
 
 
+def test_settings_retain_all_history_roundtrip() -> None:
+    from tokenstep import settings as settings_mod
+
+    assert settings_mod.DEFAULTS["retain_all_history"] is False
+    assert settings_mod.normalize({})["retain_all_history"] is False
+    assert settings_mod.normalize({"retain_all_history": True})["retain_all_history"] is True
+    # Non-bool coerced.
+    assert settings_mod.normalize({"retain_all_history": 1})["retain_all_history"] is True
+
+
+def test_retain_all_history_disables_cutoff() -> None:
+    # collect_all should pass modified_since=None when retain_all_history is on,
+    # and a real cutoff when off. Capture what each file collector receives.
+    captured: dict[str, object] = {}
+
+    def fake_codex(cache, live_paths, modified_since=None):
+        captured["codex"] = modified_since
+        return [], {"status": "ok", "files": 0, "records": 0}
+
+    def fake_claude(cache, live_paths, modified_since=None):
+        captured["claude"] = modified_since
+        return [], {"status": "ok", "files": 0, "records": 0}
+
+    def fake_cc(database=None):
+        return [], {"status": "missing_db", "files": 0, "records": 0}
+
+    saved = (
+        collector.collect_codex,
+        collector.collect_claude_code,
+        collector.collect_cc_switch_proxy,
+        collector.load_cache,
+        collector.save_cache,
+    )
+    collector.collect_codex = fake_codex
+    collector.collect_claude_code = fake_claude
+    collector.collect_cc_switch_proxy = fake_cc
+    collector.load_cache = lambda: {"version": collector.CACHE_VERSION, "files": {}}
+    collector.save_cache = lambda cache: None
+    try:
+        collector.collect_all({"retain_all_history": True, "history_days": 180})
+        assert captured["codex"] is None, captured
+        assert captured["claude"] is None, captured
+
+        collector.collect_all({"retain_all_history": False, "history_days": 180})
+        assert captured["codex"] is not None
+        assert captured["claude"] is not None
+    finally:
+        (
+            collector.collect_codex,
+            collector.collect_claude_code,
+            collector.collect_cc_switch_proxy,
+            collector.load_cache,
+            collector.save_cache,
+        ) = saved
+
+
 def _run() -> int:
     import inspect
 

@@ -27,6 +27,11 @@ SmartScreen may warn on first run: **More info → Run anyway**.)
 
 ## What's new (synced from macOS)
 
+- **0.1.29** *(Windows-only)* — **Retain-all-history option.** By default refreshes
+  skip log files older than your history window (default 180 days) for speed, so
+  cumulative (累计) reflects roughly the last 6 months. Turn on **保留全部历史记录** in
+  Settings to scan every log and keep all-time cumulative totals (slower on large
+  log sets). Off by default.
 - **0.1.28** — Synced with the macOS 0.1.15–0.1.28 line, **collector parity**. New
   **CC Switch Proxy** data source: if you route Claude/Codex/Gemini through the
   [CC Switch](https://github.com/farion1231/cc-switch) local proxy, its logged token
@@ -160,9 +165,13 @@ required on the target machine. Double-click it, or drop a shortcut in
   "auto_update_enabled": true,
   "ask_before_downloading_updates": true,
   "require_verified_updates": true,
-  "skipped_update_version": null
+  "skipped_update_version": null,
+  "retain_all_history": false
 }
 ```
+
+`retain_all_history` is Windows-only: `false` (default) skips log files older than
+`history_days` for faster refreshes; `true` scans everything for all-time totals.
 
 Cost estimates are approximate (edit `pricing.json`) and are **not** a bill.
 

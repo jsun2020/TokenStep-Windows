@@ -7,4 +7,4 @@ adds a Windows-native tray icon (progress ring), settings dialog, autostart, and
 an HTML dashboard.
 """
 
-__version__ = "0.1.28"
+__version__ = "0.1.29"

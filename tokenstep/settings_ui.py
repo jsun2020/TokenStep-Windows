@@ -106,16 +106,22 @@ def open_settings_dialog(
         row=6, column=0, columnspan=2, sticky="w", padx=(18, 0), pady=(0, 4)
     )
 
+    # History retention -------------------------------------------------------
+    retain_var = tk.BooleanVar(value=bool(current.get("retain_all_history", False)))
+    ttk.Checkbutton(frame, text="保留全部历史记录（统计更慢）", variable=retain_var).grid(
+        row=7, column=0, columnspan=2, sticky="w", pady=(2, 4)
+    )
+
     ttk.Label(
         frame,
         text="数据仅保存在本机，不上传任何代码或对话内容。",
         foreground="#6b7280",
         wraplength=300,
-    ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 12))
+    ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 12))
 
     status_var = tk.StringVar(value="")
     ttk.Label(frame, textvariable=status_var, foreground="#216E39").grid(
-        row=8, column=0, columnspan=2, sticky="w"
+        row=9, column=0, columnspan=2, sticky="w"
     )
 
     def do_save() -> None:
@@ -134,6 +140,7 @@ def open_settings_dialog(
                 "auto_update_enabled": autoupdate_var.get(),
                 "ask_before_downloading_updates": ask_var.get(),
                 "require_verified_updates": verify_var.get(),
+                "retain_all_history": retain_var.get(),
             }
         )
         try:
@@ -148,7 +155,7 @@ def open_settings_dialog(
         root.destroy()
 
     button_row = ttk.Frame(frame)
-    button_row.grid(row=9, column=0, columnspan=2, sticky="e", pady=(14, 0))
+    button_row.grid(row=10, column=0, columnspan=2, sticky="e", pady=(14, 0))
     ttk.Button(button_row, text="取消", command=root.destroy).grid(row=0, column=0, padx=(0, 8))
     ttk.Button(button_row, text="保存", command=do_save).grid(row=0, column=1)
 

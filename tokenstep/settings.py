@@ -25,12 +25,21 @@ DEFAULTS: dict[str, Any] = {
     "ask_before_downloading_updates": True,
     "require_verified_updates": True,
     "skipped_update_version": None,
+    # Windows-only: keep ALL history (scan every log) instead of skipping files
+    # older than the history window. Off by default — the window keeps refreshes
+    # fast on large log sets; turn on to preserve all-time cumulative totals.
+    "retain_all_history": False,
 }
 
 VALID_INTERVALS = {0, 60, 300, 900}
 # Theme ids the macOS app understands (0.1.11+). Windows only renders "green".
 VALID_THEMES = {"green", "ocean", "violet", "amber", "graphite"}
-_BOOL_KEYS = ("auto_update_enabled", "ask_before_downloading_updates", "require_verified_updates")
+_BOOL_KEYS = (
+    "auto_update_enabled",
+    "ask_before_downloading_updates",
+    "require_verified_updates",
+    "retain_all_history",
+)
 
 
 def normalize(raw: dict[str, Any] | None) -> dict[str, Any]:
