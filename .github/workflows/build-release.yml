@@ -50,16 +50,17 @@ jobs:
           $zipItem = Get-ChildItem dist/TokenStep-*-win64.zip | Select-Object -First 1
           $zip = $zipItem.FullName
           # Publish the SHA-256 so the in-app auto-updater can verify the download.
+          # Plain labeled line (no code fence) — keeps the digest glued to nothing
+          # so the updater's `\b<64-hex>\b` parser finds it next to the asset name.
           $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          $notes = "## TokenStep for Windows $tag`n`n" +
-                   "### SHA-256`n" +
-                   "``````n$sha  $($zipItem.Name)`n```````n"
+          $notes = "## TokenStep for Windows $tag`n`nSHA-256: $sha  $($zipItem.Name)`n"
           $notesFile = Join-Path $env:RUNNER_TEMP "release-notes.md"
           Set-Content -Path $notesFile -Value $notes -Encoding utf8
+          # Recreate fresh so notes always include both the SHA-256 and the
+          # auto-generated changelog (gh release edit can't --generate-notes).
+          # Deleting the release keeps the git tag (no --cleanup-tag).
           gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag "$zip" --clobber
-            gh release edit $tag --notes-file "$notesFile"
-          } else {
-            gh release create $tag "$zip" --title "TokenStep for Windows $tag" --notes-file "$notesFile" --generate-notes
+            gh release delete $tag --yes
           }
+          gh release create $tag "$zip" --title "TokenStep for Windows $tag" --notes-file "$notesFile" --generate-notes
