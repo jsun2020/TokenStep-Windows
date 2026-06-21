@@ -31,8 +31,10 @@ CACHE_DIR = ROOT / "cache"
 COLLECTOR_CACHE_JSON = CACHE_DIR / "collector-cache.json"
 LOGS_DIR = ROOT / "logs"
 ERROR_LOG = LOGS_DIR / "tokenstep.log"
+# Staging area for downloaded update packages and the install helper.
+UPDATES_DIR = ROOT / "updates"
 
 
 def ensure_dirs() -> None:
-    for directory in (DATA_DIR, CONFIG_DIR, CACHE_DIR, LOGS_DIR):
+    for directory in (DATA_DIR, CONFIG_DIR, CACHE_DIR, LOGS_DIR, UPDATES_DIR):
         directory.mkdir(parents=True, exist_ok=True)

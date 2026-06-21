@@ -30,6 +30,8 @@ class TokenStepTray:
         self.refreshing = False
         self.available_update: dict | None = None
         self.checking_update = False
+        self.installing_update = False
+        self._last_progress_bucket = 0
         self._stop = threading.Event()
         self._wakeup = threading.Event()
         self._lock = threading.Lock()
@@ -107,9 +109,7 @@ class TokenStepTray:
             MenuItem("保存今日截图…", self._on_save_screenshot),
             Menu.SEPARATOR,
             MenuItem(
-                lambda item: f"⬆ 有新版本 v{self.available_update['version']} · 打开下载页"
-                if self.available_update
-                else "检查更新",
+                self._update_label,
                 self._on_update_clicked,
             ),
             Menu.SEPARATOR,
@@ -243,14 +243,120 @@ class TokenStepTray:
         except Exception:
             pass
 
-    def _on_update_clicked(self, icon=None, item=None) -> None:
+    def _update_label(self, item=None) -> str:
+        if self.installing_update:
+            return "正在安装更新…"
         if self.available_update:
+            version = self.available_update.get("version", "")
+            # Auto-install only when we are the frozen exe and the release ships a
+            # Windows package; otherwise fall back to the download page.
+            if updater.is_frozen() and self.available_update.get("asset_url"):
+                return f"⬆ 有新版本 v{version} · 立即更新"
+            return f"⬆ 有新版本 v{version} · 打开下载页"
+        return "检查更新"
+
+    def _on_update_clicked(self, icon=None, item=None) -> None:
+        if not self.available_update:
+            threading.Thread(target=self._check_updates, args=(False,), daemon=True).start()
+            return
+
+        info = self.available_update
+        can_auto = updater.is_frozen() and info.get("asset_url")
+        if not can_auto:
             try:
-                webbrowser.open(self.available_update.get("page_url", updater.RELEASES_PAGE_URL))
+                webbrowser.open(info.get("page_url", updater.RELEASES_PAGE_URL))
             except Exception as exc:
                 collector.log_error(exc)
-        else:
-            threading.Thread(target=self._check_updates, args=(False,), daemon=True).start()
+            return
+
+        threading.Thread(target=self._install_update, args=(info,), daemon=True).start()
+
+    def _install_update(self, info: dict) -> None:
+        with self._lock:
+            if self.installing_update:
+                return
+            self.installing_update = True
+            self._last_progress_bucket = 0
+        self._update_menu()
+        try:
+            version = info.get("version", "")
+            if self.settings.get("ask_before_downloading_updates", True):
+                if not self._confirm_update(info):
+                    return
+            self._notify(f"正在下载 v{version}…", "TokenStep 更新")
+            updater.download_and_install(
+                info,
+                require_verified=bool(self.settings.get("require_verified_updates", True)),
+                on_progress=self._on_download_progress,
+            )
+            self._notify("更新已下载，正在安装并重启…", "TokenStep 更新")
+            self._quit_for_update()
+        except updater.UpdateError as exc:
+            collector.log_error(exc)
+            self._notify(str(exc) or "更新失败，请稍后再试。", "TokenStep 更新")
+            # Leave a manual escape hatch.
+            try:
+                webbrowser.open(info.get("page_url", updater.RELEASES_PAGE_URL))
+            except Exception:
+                pass
+        except Exception as exc:
+            collector.log_error(exc)
+            self._notify("更新失败，请稍后再试。", "TokenStep 更新")
+        finally:
+            with self._lock:
+                self.installing_update = False
+            self._update_menu()
+
+    def _on_download_progress(self, fraction: float) -> None:
+        # Notify at coarse milestones only — Windows toasts can't show a live bar.
+        pct = int(fraction * 100)
+        bucket = pct - (pct % 25)
+        if bucket > self._last_progress_bucket and bucket in (25, 50, 75):
+            self._last_progress_bucket = bucket
+            self._notify(f"下载更新中… {bucket}%", "TokenStep 更新")
+
+    def _confirm_update(self, info: dict) -> bool:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        version = info.get("version", "")
+        size = info.get("asset_size") or 0
+        size_mb = f"{size / (1024 * 1024):.1f} MB" if size else "未知大小"
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
+        try:
+            ok = messagebox.askyesno(
+                "TokenStep 更新",
+                f"发现新版本 v{version}（{size_mb}）。\n"
+                "现在下载并自动安装、重启 TokenStep 吗？",
+                parent=root,
+            )
+        finally:
+            root.destroy()
+        return bool(ok)
+
+    def _quit_for_update(self) -> None:
+        # Stop the tray loop, then hard-exit shortly after so the helper (which is
+        # waiting on this PID) can replace the locked exe and relaunch.
+        self._stop.set()
+        self._wakeup.set()
+        try:
+            self.icon.stop()
+        except Exception:
+            pass
+
+        def _hard_exit() -> None:
+            import os as _os
+
+            _os._exit(0)
+
+        timer = threading.Timer(1.5, _hard_exit)
+        timer.daemon = True
+        timer.start()
 
     def _check_updates(self, silent: bool) -> None:
         with self._lock:
@@ -273,8 +379,12 @@ class TokenStepTray:
 
         if info:
             self.available_update = info
+            if updater.is_frozen() and info.get("asset_url"):
+                hint = "点击托盘菜单“立即更新”。"
+            else:
+                hint = "点击托盘菜单打开下载页。"
             self._notify(
-                f"发现新版本 v{info['version']}，点击托盘菜单打开下载页。",
+                f"发现新版本 v{info['version']}，{hint}",
                 "TokenStep 有更新",
             )
             self._update_menu()

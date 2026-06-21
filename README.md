@@ -27,14 +27,19 @@ SmartScreen may warn on first run: **More info → Run anyway**.)
 
 ## What's new (synced from macOS)
 
+- **0.1.15** — **In-app auto-update** (parity with macOS). When a newer release is
+  found, the tray's *立即更新* downloads the win64 zip, verifies its **SHA-256** (when
+  the release publishes one), swaps the portable `TokenStep.exe` via a small helper,
+  and relaunches — no manual unzip/replace. It asks before downloading by default
+  (toggle: 下载前先询问) and you can require a verified checksum (仅安装校验通过的版本).
+  Running from source instead of the built .exe falls back to opening the download page.
 - **0.1.14** — Synced with the macOS 0.1.8–0.1.14 line. The collector cache format
   is bumped (a one-time re-parse on first launch), the settings file now round-trips
   the macOS **theme** field for cross-platform compatibility, and the macOS
   duplicate-instance guard (0.1.8) is already covered here by the Windows
-  single-instance mutex. *Platform differences, on purpose:* the macOS theme-color
+  single-instance mutex. *Platform difference, on purpose:* the macOS theme-color
   palettes (ocean/violet/amber/graphite) are **not** ported — Windows keeps the green
-  brand identity — and the macOS **auto-install** updater is intentionally left out:
-  this port stays **check-only** and never downloads or installs an .exe for you.
+  brand identity.
 - **0.1.7** — Share-card screenshot. The tray gains **复制今日截图** and
   **保存今日截图…**: TokenStep renders a branded "今日" stats card (logo, step-ring,
   今日完成 %, 消耗/本月均值, 累计/活跃/达标) and copies it to the clipboard or saves
@@ -78,10 +83,11 @@ the same locations the agents already write to.
 - **Share-card screenshot** — 复制今日截图 / 保存今日截图… render a branded "今日"
   stats card (PNG) to the clipboard or a file, for sharing to the community.
 - **Autostart** — optional launch on login via the Windows Run registry key.
-- **Update check** — on launch (toggle: 启动时检查更新) and via the tray's
-  *检查更新* item, it checks GitHub Releases and, if a newer version exists, shows
-  a notification and a link to the download page. It is **check-only**: it never
-  silently downloads or installs an .exe.
+- **Auto-update** — on launch (toggle: 启动时检查更新) and via the tray's
+  *检查更新* item, it checks GitHub Releases. If a newer version exists, the built
+  .exe can **download, verify (SHA-256), install, and relaunch** itself from the
+  tray's *立即更新* (asks first by default; 下载前先询问 / 仅安装校验通过的版本
+  toggles). When run from source it instead opens the download page.
 - **Local storage** — everything under `%APPDATA%\TokenStep`.
 
 ## Requirements

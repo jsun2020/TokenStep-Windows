@@ -93,7 +93,17 @@ def open_settings_dialog(
     # Auto update check -------------------------------------------------------
     autoupdate_var = tk.BooleanVar(value=bool(current.get("auto_update_enabled", True)))
     ttk.Checkbutton(frame, text="启动时检查更新", variable=autoupdate_var).grid(
-        row=4, column=0, columnspan=2, sticky="w", pady=(2, 4)
+        row=4, column=0, columnspan=2, sticky="w", pady=(2, 2)
+    )
+
+    ask_var = tk.BooleanVar(value=bool(current.get("ask_before_downloading_updates", True)))
+    ttk.Checkbutton(frame, text="下载前先询问", variable=ask_var).grid(
+        row=5, column=0, columnspan=2, sticky="w", padx=(18, 0), pady=(0, 2)
+    )
+
+    verify_var = tk.BooleanVar(value=bool(current.get("require_verified_updates", True)))
+    ttk.Checkbutton(frame, text="仅安装校验通过的版本（有 SHA-256 时）", variable=verify_var).grid(
+        row=6, column=0, columnspan=2, sticky="w", padx=(18, 0), pady=(0, 4)
     )
 
     ttk.Label(
@@ -101,11 +111,11 @@ def open_settings_dialog(
         text="数据仅保存在本机，不上传任何代码或对话内容。",
         foreground="#6b7280",
         wraplength=300,
-    ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 12))
+    ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 12))
 
     status_var = tk.StringVar(value="")
     ttk.Label(frame, textvariable=status_var, foreground="#216E39").grid(
-        row=6, column=0, columnspan=2, sticky="w"
+        row=8, column=0, columnspan=2, sticky="w"
     )
 
     def do_save() -> None:
@@ -122,6 +132,8 @@ def open_settings_dialog(
                 "daily_goal_tokens": goal_tokens,
                 "refresh_interval_seconds": interval_seconds,
                 "auto_update_enabled": autoupdate_var.get(),
+                "ask_before_downloading_updates": ask_var.get(),
+                "require_verified_updates": verify_var.get(),
             }
         )
         try:
@@ -136,7 +148,7 @@ def open_settings_dialog(
         root.destroy()
 
     button_row = ttk.Frame(frame)
-    button_row.grid(row=7, column=0, columnspan=2, sticky="e", pady=(14, 0))
+    button_row.grid(row=9, column=0, columnspan=2, sticky="e", pady=(14, 0))
     ttk.Button(button_row, text="取消", command=root.destroy).grid(row=0, column=0, padx=(0, 8))
     ttk.Button(button_row, text="保存", command=do_save).grid(row=0, column=1)
 
