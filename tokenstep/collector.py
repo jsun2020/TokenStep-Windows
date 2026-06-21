@@ -32,6 +32,12 @@ CACHE_VERSION = 2
 TOOL_COLORS = {
     "Codex": "#2DA44E",
     "Claude Code": "#216E39",
+    # CC Switch proxy sources (macOS 0.1.20+). Distinct green/teal shades so they
+    # show up in the per-tool daily breakdown; unknown app types fall back to the
+    # default color and still count toward totals.
+    "Claude Code via CC Switch": "#1A7F4B",
+    "Codex via CC Switch": "#3FB950",
+    "Gemini via CC Switch": "#2C8C7C",
 }
 
 DEFAULT_PRICING: dict[str, Any] = {
@@ -117,11 +123,19 @@ def date_from_iso(ts: str | None) -> str | None:
     return parsed.date().isoformat() if parsed else None
 
 
-def date_from_epoch(seconds: int | float | None) -> str | None:
+def date_from_epoch(seconds: int | float | str | None) -> str | None:
     if seconds is None:
         return None
     try:
-        return dt.datetime.fromtimestamp(float(seconds), _LOCAL_TZ).date().isoformat()
+        value = float(seconds)
+    except (TypeError, ValueError):
+        return None
+    # Some sources store epoch milliseconds; scale down (matches macOS
+    # dayString(fromEpoch:) — anything past year ~2286 in seconds is really ms).
+    if value > 10_000_000_000:
+        value /= 1_000.0
+    try:
+        return dt.datetime.fromtimestamp(value, _LOCAL_TZ).date().isoformat()
     except Exception:
         return None
 
@@ -281,6 +295,32 @@ def _file_meta(path: str) -> tuple[int, float] | None:
         return None
 
 
+def source_file_cutoff(history_days: int) -> float | None:
+    """Epoch seconds before which log files are too old to scan.
+
+    Mirrors macOS sourceFileCutoffDate: today - max(7, history_days + 1) days.
+    Files last modified before this are skipped (and their cache entries pruned),
+    so refreshes don't re-walk months of stale logs. Returns None on bad input
+    (scan everything).
+    """
+    try:
+        days = max(7, int(history_days) + 1)
+    except (TypeError, ValueError):
+        return None
+    cutoff = dt.datetime.now(_LOCAL_TZ) - dt.timedelta(days=days)
+    return cutoff.timestamp()
+
+
+def _too_old(path: str, cutoff: float | None) -> bool:
+    """True when the file's mtime is older than the cutoff (so we should skip it)."""
+    if cutoff is None:
+        return False
+    meta = _file_meta(path)
+    if not meta:
+        return False  # let the normal read path handle missing/unreadable files
+    return meta[1] < cutoff
+
+
 def load_cache() -> dict[str, Any]:
     try:
         with paths.COLLECTOR_CACHE_JSON.open("r", encoding="utf-8") as f:
@@ -339,7 +379,7 @@ def store_records(cache: dict[str, Any], path: str, tool: str, records: list[dic
 
 
 def collect_codex(
-    cache: dict[str, Any], live_paths: set[str]
+    cache: dict[str, Any], live_paths: set[str], modified_since: float | None = None
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     home = Path.home()
     candidates: list[str] = []
@@ -349,7 +389,7 @@ def collect_codex(
     ]:
         candidates.extend(glob.glob(pattern, recursive=True))
 
-    paths_list = sorted(set(candidates))
+    paths_list = [p for p in sorted(set(candidates)) if not _too_old(p, modified_since)]
     records: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
 
@@ -460,12 +500,12 @@ def collect_codex_from_threads() -> list[dict[str, Any]]:
 
 
 def collect_claude_code(
-    cache: dict[str, Any], live_paths: set[str]
+    cache: dict[str, Any], live_paths: set[str], modified_since: float | None = None
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     candidates = glob.glob(
         str(Path.home() / ".claude" / "projects" / "**" / "*.jsonl"), recursive=True
     )
-    paths_list = sorted(candidates)
+    paths_list = [p for p in sorted(candidates) if not _too_old(p, modified_since)]
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
 
@@ -523,6 +563,181 @@ def collect_claude_code(
     }
 
 
+def _cc_switch_tool_name(app_type: str | None) -> str:
+    """Map a CC Switch app_type to a display tool name (mirrors macOS)."""
+    value = (app_type or "unknown").strip()
+    normalized = value.lower()
+    if normalized == "claude":
+        return "Claude Code via CC Switch"
+    if normalized == "codex":
+        return "Codex via CC Switch"
+    if normalized == "gemini":
+        return "Gemini via CC Switch"
+    label = value if value else "unknown"
+    return f"{label} via CC Switch (experimental)"
+
+
+def _cc_switch_db_path() -> Path | None:
+    """Locate the CC Switch SQLite DB across Mac- and Windows-style locations."""
+    candidates = [Path.home() / ".cc-switch" / "cc-switch.db"]
+    for env in ("APPDATA", "LOCALAPPDATA"):
+        base = os.environ.get(env)
+        if base:
+            candidates.append(Path(base) / "cc-switch" / "cc-switch.db")
+    return next((p for p in candidates if p.exists()), None)
+
+
+# The token + bucketing columns we genuinely need. CC Switch's schema varies
+# across versions/platforms (e.g. the Windows build omits pricing_model and
+# data_source that macOS 0.1.28 assumes), so we require only the essentials and
+# adapt the query to whatever optional columns are present.
+_CC_SWITCH_REQUIRED_COLUMNS = {
+    "app_type",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+    "status_code",
+    "created_at",
+}
+
+
+def _cc_switch_query(available: set[str]) -> str:
+    """Build the proxy_request_logs query for the columns that actually exist."""
+    # Prefer pricing_model, then model, then request_model — whichever exist.
+    model_cols = [c for c in ("pricing_model", "model", "request_model") if c in available]
+    if model_cols:
+        model_expr = (
+            "coalesce("
+            + ", ".join(f"nullif({c}, '')" for c in model_cols)
+            + ", 'unknown') as display_model"
+        )
+    else:
+        model_expr = "'unknown' as display_model"
+
+    cost_expr = (
+        "cast(coalesce(nullif(total_cost_usd, ''), '0') as real) as total_cost_usd"
+        if "total_cost_usd" in available
+        else "0.0 as total_cost_usd"
+    )
+
+    # Only filter on data_source when CC Switch records it.
+    data_source_clause = (
+        "coalesce(data_source, 'proxy') = 'proxy' and "
+        if "data_source" in available
+        else ""
+    )
+    order = "order by created_at, request_id" if "request_id" in available else "order by created_at"
+
+    return f"""
+    select
+        created_at,
+        app_type,
+        {model_expr},
+        coalesce(input_tokens, 0) as input_tokens,
+        coalesce(output_tokens, 0) as output_tokens,
+        coalesce(cache_read_tokens, 0) as cache_read_tokens,
+        coalesce(cache_creation_tokens, 0) as cache_creation_tokens,
+        {cost_expr}
+    from proxy_request_logs
+    where {data_source_clause}status_code >= 200
+        and status_code < 300
+        and (
+            coalesce(input_tokens, 0)
+            + coalesce(output_tokens, 0)
+            + coalesce(cache_read_tokens, 0)
+            + coalesce(cache_creation_tokens, 0)
+        ) > 0
+    {order}
+    """
+
+
+def collect_cc_switch_proxy(
+    database: Path | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Read CC Switch proxy usage from its SQLite log (macOS 0.1.20+ parity).
+
+    CC Switch routes Claude/Codex/Gemini traffic through a local proxy and logs
+    per-request token counts. We read the proxy_request_logs table read-only and
+    map each successful, non-empty request to a usage record. The query adapts to
+    the installed CC Switch schema (optional pricing_model / data_source /
+    total_cost_usd columns). Returns (records, source_meta); never raises
+    (missing/locked DB -> empty + status).
+    """
+    db_path = database or _cc_switch_db_path()
+    if not db_path or not db_path.exists():
+        return [], {"status": "missing_db", "files": 0, "records": 0}
+
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+    except Exception:
+        return [], {"status": "unreadable_db", "files": 1, "records": 0}
+
+    try:
+        con.row_factory = sqlite3.Row
+        try:
+            cols = con.execute("pragma table_info(proxy_request_logs)").fetchall()
+        except Exception:
+            return [], {"status": "schema_unreadable", "files": 1, "records": 0}
+        if not cols:
+            return [], {"status": "missing_table", "files": 1, "records": 0}
+        available = {row["name"] for row in cols}
+        if not _CC_SWITCH_REQUIRED_COLUMNS.issubset(available):
+            return [], {"status": "schema_mismatch", "files": 1, "records": 0}
+
+        try:
+            rows = con.execute(_cc_switch_query(available)).fetchall()
+        except Exception:
+            return [], {"status": "query_failed", "files": 1, "records": 0}
+
+        records: list[dict[str, Any]] = []
+        for row in rows:
+            day = date_from_epoch(row["created_at"])
+            if not day:
+                continue
+            usage = empty_usage()
+            usage["input_tokens"] = int(row["input_tokens"] or 0)
+            usage["output_tokens"] = int(row["output_tokens"] or 0)
+            usage["cache_read_input_tokens"] = int(row["cache_read_tokens"] or 0)
+            usage["cache_creation_input_tokens"] = int(row["cache_creation_tokens"] or 0)
+            usage["total_tokens"] = (
+                usage["input_tokens"]
+                + usage["output_tokens"]
+                + usage["cache_read_input_tokens"]
+                + usage["cache_creation_input_tokens"]
+            )
+            if usage["total_tokens"] <= 0:
+                continue
+            try:
+                cost = float(row["total_cost_usd"] or 0.0)
+            except (TypeError, ValueError):
+                cost = 0.0
+            records.append(
+                {
+                    "date": day,
+                    "timestamp": None,
+                    "tool": _cc_switch_tool_name(row["app_type"]),
+                    "model": model_key(row["display_model"]),
+                    "usage": usage,
+                    "source": "cc-switch-proxy",
+                    # CC Switch logs the real billed cost; aggregate() uses it
+                    # verbatim instead of estimating from the pricing table.
+                    "cost": cost,
+                }
+            )
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+
+    return records, {
+        "status": "ok" if records else "missing_proxy_rows",
+        "files": 1,
+        "records": len(records),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Aggregation
 # ---------------------------------------------------------------------------
@@ -541,7 +756,12 @@ def aggregate(records: list[dict[str, Any]], pricing: dict[str, Any]) -> dict[st
         tool = record["tool"]
         model = record["model"]
         usage = record["usage"]
-        cost = estimate_cost(usage, tool, model, pricing)
+        # Use the source-reported cost when present (e.g. CC Switch logs the real
+        # billed amount); otherwise estimate from the local pricing table.
+        if record.get("cost") is not None:
+            cost = float(record["cost"])
+        else:
+            cost = estimate_cost(usage, tool, model, pricing)
         day = record["date"]
 
         daily = daily_map[day]
@@ -621,17 +841,27 @@ def aggregate(records: list[dict[str, Any]], pricing: dict[str, Any]) -> dict[st
 def collect_all(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     if settings:
         configure_timezone(settings.get("timezone"))
+    history_days = int((settings or {}).get("history_days", 180) or 180)
+    cutoff = source_file_cutoff(history_days)
     pricing = load_pricing()
     cache = load_cache()
     live_paths: set[str] = set()
-    codex_records, codex_meta = collect_codex(cache, live_paths)
-    claude_records, claude_meta = collect_claude_code(cache, live_paths)
-    # Drop cache entries for files that no longer exist.
+    codex_records, codex_meta = collect_codex(cache, live_paths, modified_since=cutoff)
+    claude_records, claude_meta = collect_claude_code(
+        cache, live_paths, modified_since=cutoff
+    )
+    cc_switch_records, cc_switch_meta = collect_cc_switch_proxy()
+    # Drop cache entries for files no longer scanned (deleted or aged past the
+    # history window) — matches the macOS collector's livePaths pruning.
     cache["files"] = {p: e for p, e in cache["files"].items() if p in live_paths}
     save_cache(cache)
-    records = codex_records + claude_records
+    records = codex_records + claude_records + cc_switch_records
     result = aggregate(records, pricing)
-    result["sources"] = {"Codex": codex_meta, "Claude Code": claude_meta}
+    result["sources"] = {
+        "Codex": codex_meta,
+        "Claude Code": claude_meta,
+        "CC Switch Proxy": cc_switch_meta,
+    }
     return result
 
 

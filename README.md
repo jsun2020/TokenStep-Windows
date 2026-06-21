@@ -10,7 +10,7 @@ toward a token goal, and keeps a local history dashboard.
 
 This is the Windows port of the macOS TokenStep menu-bar app. It reuses the same
 cross-platform collector logic and matches the same data format, so the two stay
-in sync conceptually. **Kept in sync through macOS v0.1.14.**
+in sync conceptually. **Kept in sync through macOS v0.1.28.**
 
 > **Credit & thanks:** This is a community **Windows port** of
 > [TokenStep](https://github.com/Backtthefuture/TokenStep) (macOS) by **AI产品黄叔
@@ -27,6 +27,15 @@ SmartScreen may warn on first run: **More info → Run anyway**.)
 
 ## What's new (synced from macOS)
 
+- **0.1.28** — Synced with the macOS 0.1.15–0.1.28 line, **collector parity**. New
+  **CC Switch Proxy** data source: if you route Claude/Codex/Gemini through the
+  [CC Switch](https://github.com/farion1231/cc-switch) local proxy, its logged token
+  usage is now counted too (read-only from `cc-switch.db`; the reader adapts to the
+  installed schema). Refreshes also skip log files older than your history window
+  (default 180 days) for faster collection on large histories. *Platform differences,
+  on purpose:* the macOS-native UI added in this range — Token Island, the redesigned
+  settings, share scorecards, and multilingual localization — is **not** ported; the
+  Windows port keeps its tray + HTML dashboard and green identity.
 - **0.1.15** — **In-app auto-update** (parity with macOS). When a newer release is
   found, the tray's *立即更新* downloads the win64 zip, verifies its **SHA-256** (when
   the release publishes one), swaps the portable `TokenStep.exe` via a small helper,
@@ -63,6 +72,8 @@ SmartScreen may warn on first run: **More info → Run anyway**.)
 
 - **Claude Code** — usage metadata from `~/.claude/projects/**/*.jsonl`
 - **Codex** — token metadata from `~/.codex/sessions/**/*.jsonl` (SQLite fallback)
+- **CC Switch Proxy** — per-request token counts from the CC Switch proxy log
+  (`~/.cc-switch/cc-switch.db`, also checked under `%APPDATA%`), when present
 
 On Windows, `~` is your user folder (e.g. `C:\Users\<you>`), so these are exactly
 the same locations the agents already write to.
