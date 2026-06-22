@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import glob
 import json
+import math
 import os
 import sqlite3
 import traceback
@@ -23,9 +24,10 @@ from typing import Any
 from . import paths
 
 # Bump when the cached record shape changes, to invalidate old caches.
-# v3 matches macOS 0.1.32 (CollectorCache.currentVersion = 3): forces a one-time
-# re-parse so the Claude Code response-dedup (below) applies to cached files.
-CACHE_VERSION = 3
+# v4 matches macOS 0.1.42 (CollectorCache.currentVersion = 4): forces a one-time
+# re-parse so cached records carry the new identity fields (request/session/
+# response ids) needed for cross-source (native vs CC Switch proxy) dedup.
+CACHE_VERSION = 4
 
 # Green "step" identity, matching the macOS SwiftUI app
 # (tokenGreen / tokenGreenDark, GitHub-contribution greens).
@@ -123,21 +125,55 @@ def date_from_iso(ts: str | None) -> str | None:
     return parsed.date().isoformat() if parsed else None
 
 
-def date_from_epoch(seconds: int | float | str | None) -> str | None:
-    if seconds is None:
+def _epoch_seconds(value: int | float | str | None) -> float | None:
+    if value is None:
         return None
     try:
-        value = float(seconds)
+        seconds = float(value)
     except (TypeError, ValueError):
         return None
     # Some sources store epoch milliseconds; scale down (matches macOS
-    # dayString(fromEpoch:) — anything past year ~2286 in seconds is really ms).
-    if value > 10_000_000_000:
-        value /= 1_000.0
+    # epochSeconds — anything past year ~2286 in seconds is really ms).
+    if seconds > 10_000_000_000:
+        seconds /= 1_000.0
+    return seconds
+
+
+def date_from_epoch(seconds: int | float | str | None) -> str | None:
+    value = _epoch_seconds(seconds)
+    if value is None:
+        return None
     try:
         return dt.datetime.fromtimestamp(value, _LOCAL_TZ).date().isoformat()
     except Exception:
         return None
+
+
+def iso_from_epoch(seconds: int | float | str | None) -> str | None:
+    """ISO-8601 timestamp from an epoch (s or ms). Used so CC Switch proxy rows
+    carry a timestamp for cross-source dedup (matches macOS isoString(fromEpoch:))."""
+    value = _epoch_seconds(seconds)
+    if value is None:
+        return None
+    try:
+        return dt.datetime.fromtimestamp(value, _LOCAL_TZ).isoformat()
+    except Exception:
+        return None
+
+
+def _nonempty(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
+def _first_nonempty(*values: Any) -> str | None:
+    for value in values:
+        result = _nonempty(value)
+        if result:
+            return result
+    return None
 
 
 def empty_usage() -> dict[str, int]:
@@ -383,9 +419,11 @@ def collect_codex(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     home = Path.home()
     candidates: list[str] = []
+    # Only live sessions count as current usage. archived_sessions can hold
+    # restored historical logs with rewritten timestamps that would inflate
+    # totals, so it is excluded (matches macOS 0.1.42).
     for pattern in [
         str(home / ".codex" / "sessions" / "**" / "*.jsonl"),
-        str(home / ".codex" / "archived_sessions" / "*.jsonl"),
     ]:
         candidates.extend(glob.glob(pattern, recursive=True))
 
@@ -441,6 +479,7 @@ def collect_codex(
                             "model": current_model,
                             "usage": usage,
                             "source": "codex-rollout",
+                            "session_id": session_id,
                         }
                     )
         except Exception:
@@ -499,22 +538,41 @@ def collect_codex_from_threads() -> list[dict[str, Any]]:
     return records
 
 
-def _claude_response_key(
+def _claude_identity(
     obj: dict[str, Any], message: dict[str, Any], path: str, line_no: int
-) -> str:
-    """Group lines belonging to one Claude Code response (mirrors macOS 0.1.32).
+) -> dict[str, Any]:
+    """Identity for one Claude Code response line (mirrors macOS 0.1.42).
 
-    Prefer a stable response id (message.id, then requestId/request_id), then the
-    per-line uuid, then the file+line as a last resort so distinct rows never
-    collapse together.
+    Returns the per-response dedup ``key`` plus the request/response/session ids
+    used later for cross-source dedup against CC Switch proxy rows. Key precedence:
+    response id (message.id) -> request id (requestId/request_id) -> per-line uuid
+    -> file+line, so distinct rows never collapse together.
     """
-    for value in (message.get("id"), obj.get("requestId"), obj.get("request_id")):
-        if isinstance(value, str) and value.strip():
-            return f"response:{value}"
-    uuid = obj.get("uuid")
-    if isinstance(uuid, str) and uuid.strip():
-        return f"uuid:{uuid}"
-    return f"line:{path}:{line_no}"
+    response_id = _nonempty(message.get("id"))
+    request_id = _first_nonempty(
+        obj.get("requestId"),
+        obj.get("request_id"),
+        message.get("requestId"),
+        message.get("request_id"),
+    )
+    session_id = _first_nonempty(
+        obj.get("sessionId"), obj.get("session_id"), obj.get("sessionID")
+    )
+    uuid = _nonempty(obj.get("uuid"))
+    if response_id:
+        key = f"response:{response_id}"
+    elif request_id:
+        key = f"request:{request_id}"
+    elif uuid:
+        key = f"uuid:{uuid}"
+    else:
+        key = f"line:{path}:{line_no}"
+    return {
+        "key": key,
+        "request_id": request_id,
+        "response_id": response_id,
+        "session_id": session_id,
+    }
 
 
 def _claude_candidate_preferred(candidate: dict[str, Any], other: dict[str, Any]) -> bool:
@@ -570,7 +628,7 @@ def collect_claude_code(
                     day = date_from_iso(obj.get("timestamp"))
                     if not day:
                         continue
-                    key = _claude_response_key(obj, message, path, line_no)
+                    identity = _claude_identity(obj, message, path, line_no)
                     candidate = {
                         "has_stop_reason": bool(
                             str(message.get("stop_reason") or "").strip()
@@ -584,8 +642,12 @@ def collect_claude_code(
                             "model": model_key(message.get("model")),
                             "usage": usage,
                             "source": "claude-jsonl",
+                            "request_id": identity["request_id"],
+                            "response_id": identity["response_id"],
+                            "session_id": identity["session_id"],
                         },
                     }
+                    key = identity["key"]
                     existing = responses.get(key)
                     if existing is None or _claude_candidate_preferred(candidate, existing):
                         responses[key] = candidate
@@ -670,10 +732,19 @@ def _cc_switch_query(available: set[str]) -> str:
     )
     order = "order by created_at, request_id" if "request_id" in available else "order by created_at"
 
+    # Identity columns power cross-source dedup (native vs proxy). Alias to a
+    # constant when the column is absent so the row always exposes the key.
+    rid_expr = "request_id" if "request_id" in available else "null"
+    sid_expr = "session_id" if "session_id" in available else "null"
+    ds_expr = "data_source" if "data_source" in available else "null"
+
     return f"""
     select
         created_at,
         app_type,
+        {rid_expr} as request_id,
+        {sid_expr} as session_id,
+        {ds_expr} as data_source,
         {model_expr},
         coalesce(input_tokens, 0) as input_tokens,
         coalesce(output_tokens, 0) as output_tokens,
@@ -756,7 +827,9 @@ def collect_cc_switch_proxy(
             records.append(
                 {
                     "date": day,
-                    "timestamp": None,
+                    # ISO timestamp (from created_at) lets cross-source dedup match
+                    # proxy rows against native records by time proximity.
+                    "timestamp": iso_from_epoch(row["created_at"]),
                     "tool": _cc_switch_tool_name(row["app_type"]),
                     "model": model_key(row["display_model"]),
                     "usage": usage,
@@ -764,6 +837,9 @@ def collect_cc_switch_proxy(
                     # CC Switch logs the real billed cost; aggregate() uses it
                     # verbatim instead of estimating from the pricing table.
                     "cost": cost,
+                    "request_id": _nonempty(row["request_id"]),
+                    "session_id": _nonempty(row["session_id"]),
+                    "data_source": _nonempty(row["data_source"]),
                 }
             )
     finally:
@@ -777,6 +853,188 @@ def collect_cc_switch_proxy(
         "files": 1,
         "records": len(records),
     }
+
+
+# ---------------------------------------------------------------------------
+# Cross-source dedup (native logs vs CC Switch proxy)
+#
+# When the user routes Claude Code / Codex traffic through the CC Switch local
+# proxy, the same request is logged twice: once in the native JSONL logs and once
+# in the proxy DB. Counting both double-counts tokens. We drop the proxy copy
+# when it matches a native record (keeping the native one, enriched with the
+# proxy's real billed cost). Gemini-via-proxy has no native source, so it is
+# always kept. Mirrors macOS 0.1.42 deduplicateCrossSource.
+# ---------------------------------------------------------------------------
+
+
+def _tool_family(tool: str | None) -> str | None:
+    value = (tool or "").lower()
+    if "claude" in value:
+        return "claude"
+    if "codex" in value:
+        return "codex"
+    if "gemini" in value:
+        return "gemini"
+    return None
+
+
+def _canonical_model(value: str | None) -> str:
+    return (value or "").strip().lower().replace("_", "-")
+
+
+def _models_compatible(lhs: str | None, rhs: str | None) -> bool:
+    left = _canonical_model(lhs)
+    right = _canonical_model(rhs)
+    if left == right:
+        return True
+    if left == "unknown" or right == "unknown":
+        return False
+    if min(len(left), len(right)) < 8:
+        return False
+    return left in right or right in left
+
+
+def _token_values_close(lhs: int, rhs: int) -> bool:
+    if lhs == rhs:
+        return True
+    baseline = max(lhs, rhs)
+    if baseline <= 0:
+        return True
+    tolerance = max(4, math.ceil(baseline * 0.01))
+    return abs(lhs - rhs) <= tolerance
+
+
+def _usage_vectors_close(lhs: dict[str, int], rhs: dict[str, int]) -> bool:
+    if not _token_values_close(lhs.get("total_tokens", 0), rhs.get("total_tokens", 0)):
+        return False
+    for key in (
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "reasoning_output_tokens",
+    ):
+        left = lhs.get(key, 0)
+        right = rhs.get(key, 0)
+        if left == 0 and right == 0:
+            continue
+        if not _token_values_close(left, right):
+            return False
+    return True
+
+
+def _timestamps_close(lhs: str | None, rhs: str | None, seconds: float) -> bool:
+    left = parse_iso(lhs)
+    right = parse_iso(rhs)
+    if not left or not right:
+        return False
+    return abs((left - right).total_seconds()) <= seconds
+
+
+def _has_exact_identity_match(proxy: dict[str, Any], native: dict[str, Any]) -> bool:
+    proxy_ids = {
+        v for v in (proxy.get("request_id"), proxy.get("response_id")) if v
+    }
+    native_ids = {
+        v for v in (native.get("request_id"), native.get("response_id")) if v
+    }
+    if proxy_ids & native_ids:
+        return True
+    proxy_session = _nonempty(proxy.get("session_id"))
+    native_session = _nonempty(native.get("session_id"))
+    return bool(
+        proxy_session
+        and native_session
+        and proxy_session == native_session
+        and _timestamps_close(proxy.get("timestamp"), native.get("timestamp"), 10)
+        and _models_compatible(proxy.get("model"), native.get("model"))
+        and _usage_vectors_close(proxy["usage"], native["usage"])
+    )
+
+
+def _has_strong_usage_match(proxy: dict[str, Any], native: dict[str, Any]) -> bool:
+    return (
+        _timestamps_close(proxy.get("timestamp"), native.get("timestamp"), 30)
+        and _models_compatible(proxy.get("model"), native.get("model"))
+        and _usage_vectors_close(proxy["usage"], native["usage"])
+    )
+
+
+def _is_duplicate(proxy: dict[str, Any], native: dict[str, Any]) -> bool:
+    if proxy.get("date") != native.get("date"):
+        return False
+    proxy_family = _tool_family(proxy.get("tool"))
+    native_family = _tool_family(native.get("tool"))
+    if not proxy_family or proxy_family != native_family:
+        return False
+    if native.get("source") == "cc-switch-proxy":
+        return False
+    return _has_exact_identity_match(proxy, native) or _has_strong_usage_match(
+        proxy, native
+    )
+
+
+def _is_deduplicable_proxy(record: dict[str, Any]) -> bool:
+    if record.get("source") != "cc-switch-proxy":
+        return False
+    return _tool_family(record.get("tool")) in ("claude", "codex")
+
+
+def deduplicate_cross_source(
+    native_records: list[dict[str, Any]], proxy_records: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Drop CC Switch proxy records that duplicate a native log record.
+
+    Returns {records, raw_proxy, kept_proxy, deduped_proxy}. The native copy is
+    kept (enriched with the proxy's real billed cost when the native record has
+    none); non-duplicate and non-deduplicable proxy rows are kept as-is.
+    """
+    enriched = list(native_records)
+    kept_proxy: list[dict[str, Any]] = []
+    deduped = 0
+
+    for proxy in proxy_records:
+        if not _is_deduplicable_proxy(proxy):
+            kept_proxy.append(proxy)
+            continue
+        match_idx = next(
+            (i for i, native in enumerate(native_records) if _is_duplicate(proxy, native)),
+            None,
+        )
+        if match_idx is None:
+            kept_proxy.append(proxy)
+            continue
+        current = enriched[match_idx]
+        proxy_cost = proxy.get("cost")
+        if current.get("cost") is None and proxy_cost and proxy_cost > 0:
+            enriched[match_idx] = {**current, "cost": float(proxy_cost)}
+        deduped += 1
+
+    return {
+        "records": enriched + kept_proxy,
+        "raw_proxy": len(proxy_records),
+        "kept_proxy": len(kept_proxy),
+        "deduped_proxy": deduped,
+    }
+
+
+def _annotate_cc_switch_meta(
+    meta: dict[str, Any], dedup: dict[str, Any]
+) -> dict[str, Any]:
+    """Record the cross-source dedup outcome on the CC Switch source meta."""
+    annotated = dict(meta)
+    annotated["raw_records"] = dedup["raw_proxy"]
+    annotated["deduped_records"] = dedup["deduped_proxy"]
+    annotated["strategy"] = "request_level_dedupe"
+    annotated["records"] = dedup["kept_proxy"]
+    if (
+        meta.get("status") == "ok"
+        and dedup["raw_proxy"] > 0
+        and dedup["kept_proxy"] == 0
+        and dedup["deduped_proxy"] > 0
+    ):
+        annotated["status"] = "all_deduped"
+    return annotated
 
 
 # ---------------------------------------------------------------------------
@@ -901,8 +1159,13 @@ def collect_all(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     # history window) — matches the macOS collector's livePaths pruning.
     cache["files"] = {p: e for p, e in cache["files"].items() if p in live_paths}
     save_cache(cache)
-    records = codex_records + claude_records + cc_switch_records
-    result = aggregate(records, pricing)
+    # Drop CC Switch proxy rows that duplicate native log records (the same
+    # request routed through the proxy is logged twice) before aggregating.
+    dedup = deduplicate_cross_source(
+        codex_records + claude_records, cc_switch_records
+    )
+    cc_switch_meta = _annotate_cc_switch_meta(cc_switch_meta, dedup)
+    result = aggregate(dedup["records"], pricing)
     result["sources"] = {
         "Codex": codex_meta,
         "Claude Code": claude_meta,

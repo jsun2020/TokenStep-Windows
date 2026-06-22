@@ -10,7 +10,7 @@ toward a token goal, and keeps a local history dashboard.
 
 This is the Windows port of the macOS TokenStep menu-bar app. It reuses the same
 cross-platform collector logic and matches the same data format, so the two stay
-in sync conceptually. **Kept in sync through macOS v0.1.32.**
+in sync conceptually. **Kept in sync through macOS v0.1.42.**
 
 > **Credit & thanks:** This is a community **Windows port** of
 > [TokenStep](https://github.com/Backtthefuture/TokenStep) (macOS) by **AI产品黄叔
@@ -27,6 +27,18 @@ SmartScreen may warn on first run: **More info → Run anyway**.)
 
 ## What's new (synced from macOS)
 
+- **0.1.42** — Synced with the macOS 0.1.32–0.1.42 line, **collector parity**.
+  **No more double-counting across native logs and the CC Switch proxy:** if you
+  route Claude Code or Codex through the [CC Switch](https://github.com/farion1231/cc-switch)
+  proxy, the same request used to be counted twice — once from the native JSONL log
+  and once from the proxy database. TokenStep now matches them up (by request id, or
+  by close timestamp + model + token counts) and keeps a single copy, carrying over
+  the proxy's real billed cost. Gemini-via-proxy has no native source, so it is still
+  counted. **Archived Codex sessions are no longer counted:** `~/.codex/archived_sessions`
+  can hold restored logs with rewritten timestamps that inflated totals; only live
+  sessions count now. (One-time cache rebuild on first run.) The macOS-only changes in
+  this line — Token Island popover polish, the rhythm share card, and the new-user
+  menu-bar default — are native-UI only and don't apply to this tray port.
 - **0.1.32** — Synced with the macOS 0.1.29–0.1.32 line, **collector parity**.
   **More accurate Claude Code counts:** Claude Code logs each part of one response
   (thinking, text, every tool call) on its own line sharing one `message.id`.
