@@ -23,9 +23,9 @@ from typing import Any
 from . import paths
 
 # Bump when the cached record shape changes, to invalidate old caches.
-# v2 matches macOS 0.1.14 (CollectorCache.currentVersion = 2): forces a one-time
-# re-parse so cached numbers align with the current collector logic.
-CACHE_VERSION = 2
+# v3 matches macOS 0.1.32 (CollectorCache.currentVersion = 3): forces a one-time
+# re-parse so the Claude Code response-dedup (below) applies to cached files.
+CACHE_VERSION = 3
 
 # Green "step" identity, matching the macOS SwiftUI app
 # (tokenGreen / tokenGreenDark, GitHub-contribution greens).
@@ -499,6 +499,37 @@ def collect_codex_from_threads() -> list[dict[str, Any]]:
     return records
 
 
+def _claude_response_key(
+    obj: dict[str, Any], message: dict[str, Any], path: str, line_no: int
+) -> str:
+    """Group lines belonging to one Claude Code response (mirrors macOS 0.1.32).
+
+    Prefer a stable response id (message.id, then requestId/request_id), then the
+    per-line uuid, then the file+line as a last resort so distinct rows never
+    collapse together.
+    """
+    for value in (message.get("id"), obj.get("requestId"), obj.get("request_id")):
+        if isinstance(value, str) and value.strip():
+            return f"response:{value}"
+    uuid = obj.get("uuid")
+    if isinstance(uuid, str) and uuid.strip():
+        return f"uuid:{uuid}"
+    return f"line:{path}:{line_no}"
+
+
+def _claude_candidate_preferred(candidate: dict[str, Any], other: dict[str, Any]) -> bool:
+    """Pick the better of two records sharing a response key (macOS 0.1.32).
+
+    Prefer the one with a stop_reason (the completed response), then the later
+    timestamp, then the later line.
+    """
+    if candidate["has_stop_reason"] != other["has_stop_reason"]:
+        return candidate["has_stop_reason"]
+    if candidate["timestamp"] != other["timestamp"]:
+        return (candidate["timestamp"] or "") > (other["timestamp"] or "")
+    return candidate["line_no"] > other["line_no"]
+
+
 def collect_claude_code(
     cache: dict[str, Any], live_paths: set[str], modified_since: float | None = None
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -507,7 +538,6 @@ def collect_claude_code(
     )
     paths_list = [p for p in sorted(candidates) if not _too_old(p, modified_since)]
     records: list[dict[str, Any]] = []
-    seen: set[str] = set()
 
     for path in paths_list:
         live_paths.add(path)
@@ -516,7 +546,12 @@ def collect_claude_code(
             records.extend(cached)
             continue
 
-        file_records: list[dict[str, Any]] = []
+        # Claude Code logs every assistant content block of one response on its
+        # own line (thinking, text, each tool_use) -- all sharing one message.id
+        # and identical usage totals. Counting each line double-counts tokens, so
+        # we dedupe per response and keep the most complete record (the final one
+        # carries stop_reason). Matches macOS 0.1.32 UsageCollector dedupe.
+        responses: dict[str, dict[str, Any]] = {}
         try:
             with open(path, "r", encoding="utf-8") as f:
                 for line_no, line in enumerate(f, 1):
@@ -535,24 +570,30 @@ def collect_claude_code(
                     day = date_from_iso(obj.get("timestamp"))
                     if not day:
                         continue
-                    unique = obj.get("uuid") or f"{path}:{line_no}"
-                    if unique in seen:
-                        continue
-                    seen.add(unique)
-                    file_records.append(
-                        {
+                    key = _claude_response_key(obj, message, path, line_no)
+                    candidate = {
+                        "has_stop_reason": bool(
+                            str(message.get("stop_reason") or "").strip()
+                        ),
+                        "timestamp": obj.get("timestamp"),
+                        "line_no": line_no,
+                        "record": {
                             "date": day,
                             "timestamp": obj.get("timestamp"),
                             "tool": "Claude Code",
                             "model": model_key(message.get("model")),
                             "usage": usage,
                             "source": "claude-jsonl",
-                        }
-                    )
+                        },
+                    }
+                    existing = responses.get(key)
+                    if existing is None or _claude_candidate_preferred(candidate, existing):
+                        responses[key] = candidate
         except Exception:
             # Don't cache a partial/failed read; try again next refresh.
             continue
 
+        file_records = [c["record"] for c in responses.values()]
         store_records(cache, path, "Claude Code", file_records)
         records.extend(file_records)
 
@@ -732,7 +773,7 @@ def collect_cc_switch_proxy(
             pass
 
     return records, {
-        "status": "ok" if records else "missing_proxy_rows",
+        "status": "ok" if records else "missing_valid_rows",
         "files": 1,
         "records": len(records),
     }

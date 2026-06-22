@@ -10,7 +10,7 @@ toward a token goal, and keeps a local history dashboard.
 
 This is the Windows port of the macOS TokenStep menu-bar app. It reuses the same
 cross-platform collector logic and matches the same data format, so the two stay
-in sync conceptually. **Kept in sync through macOS v0.1.28.**
+in sync conceptually. **Kept in sync through macOS v0.1.32.**
 
 > **Credit & thanks:** This is a community **Windows port** of
 > [TokenStep](https://github.com/Backtthefuture/TokenStep) (macOS) by **AI产品黄叔
@@ -27,6 +27,15 @@ SmartScreen may warn on first run: **More info → Run anyway**.)
 
 ## What's new (synced from macOS)
 
+- **0.1.32** — Synced with the macOS 0.1.29–0.1.32 line, **collector parity**.
+  **More accurate Claude Code counts:** Claude Code logs each part of one response
+  (thinking, text, every tool call) on its own line sharing one `message.id`.
+  TokenStep now keeps a single record per response — preferring the completed one —
+  instead of counting each line, so Claude totals no longer double-count multi-part
+  replies. (One-time cache rebuild on first run.) The macOS-only fixes in this line
+  — the autostart "drag to Applications" guard and the collector-subprocess timeout
+  / sqlite-pipe hang fix — don't apply on Windows: the collector runs in-process and
+  reads SQLite directly, with no helper subprocess to hang.
 - **0.1.29** *(Windows-only)* — **Retain-all-history option.** By default refreshes
   skip log files older than your history window (default 180 days) for speed, so
   cumulative (累计) reflects roughly the last 6 months. Turn on **保留全部历史记录** in
