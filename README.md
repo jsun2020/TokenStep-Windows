@@ -27,6 +27,13 @@ SmartScreen may warn on first run: **More info → Run anyway**.)
 
 ## What's new (synced from macOS)
 
+- **0.1.43** *(Windows-only)* — **Yesterday AI Rhythm share card**, ported from the
+  macOS 0.1.42 rhythm card. The tray gains **复制昨日节奏图** and **保存昨日节奏图…**:
+  TokenStep buckets yesterday's tokens into 24 hourly slots, classifies the day's
+  shape (双峰推进型 / 夜间 Agent 型 / 一波流型 / 碎片推进型 …), and renders a dark neon
+  card with a glowing usage wave, the peak hour/value, yesterday's total, and the
+  active-hours / night-share / longest-streak metrics. Data already collected (per-record
+  timestamps) — no new sources, still 100% local. SF Symbols are redrawn as Pillow glyphs.
 - **0.1.42** — Synced with the macOS 0.1.32–0.1.42 line, **collector parity**.
   **No more double-counting across native logs and the CC Switch proxy:** if you
   route Claude Code or Codex through the [CC Switch](https://github.com/farion1231/cc-switch)
@@ -36,9 +43,10 @@ SmartScreen may warn on first run: **More info → Run anyway**.)
   the proxy's real billed cost. Gemini-via-proxy has no native source, so it is still
   counted. **Archived Codex sessions are no longer counted:** `~/.codex/archived_sessions`
   can hold restored logs with rewritten timestamps that inflated totals; only live
-  sessions count now. (One-time cache rebuild on first run.) The macOS-only changes in
-  this line — Token Island popover polish, the rhythm share card, and the new-user
-  menu-bar default — are native-UI only and don't apply to this tray port.
+  sessions count now. (One-time cache rebuild on first run.) The other macOS changes in
+  this line — Token Island popover polish and the new-user menu-bar default — are
+  native-UI only and don't apply to this tray port; the rhythm share card is ported
+  separately in **0.1.43** below.
 - **0.1.32** — Synced with the macOS 0.1.29–0.1.32 line, **collector parity**.
   **More accurate Claude Code counts:** Claude Code logs each part of one response
   (thinking, text, every tool call) on its own line sharing one `message.id`.
@@ -119,6 +127,9 @@ the same locations the agents already write to.
   and autostart-at-login.
 - **Share-card screenshot** — 复制今日截图 / 保存今日截图… render a branded "今日"
   stats card (PNG) to the clipboard or a file, for sharing to the community.
+- **Rhythm share card** — 复制昨日节奏图 / 保存昨日节奏图… render a dark neon "昨日 AI
+  节奏" card: yesterday's hourly usage wave, the day's pattern, peak hour, and the
+  active-hours / night-share / longest-streak metrics.
 - **Autostart** — optional launch on login via the Windows Run registry key.
 - **Auto-update** — on launch (toggle: 启动时检查更新) and via the tray's
   *检查更新* item, it checks GitHub Releases. If a newer version exists, the built

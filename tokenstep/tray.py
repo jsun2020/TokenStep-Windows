@@ -107,6 +107,8 @@ class TokenStepTray:
             Menu.SEPARATOR,
             MenuItem("复制今日截图", self._on_copy_screenshot),
             MenuItem("保存今日截图…", self._on_save_screenshot),
+            MenuItem("复制昨日节奏图", self._on_copy_rhythm),
+            MenuItem("保存昨日节奏图…", self._on_save_rhythm),
             Menu.SEPARATOR,
             MenuItem(
                 self._update_label,
@@ -168,6 +170,12 @@ class TokenStepTray:
         view = collector.build_dashboard_view(snapshot, settings)
         return sharecard.render_share_card(snapshot, view)
 
+    def _build_rhythm_card(self):
+        with self._lock:
+            snapshot = self.snapshot
+        rhythm = collector.yesterday_rhythm(snapshot)
+        return sharecard.render_rhythm_card(rhythm)
+
     def _on_copy_screenshot(self, icon=None, item=None) -> None:
         def runner() -> None:
             try:
@@ -200,8 +208,40 @@ class TokenStepTray:
 
         threading.Thread(target=runner, daemon=True).start()
 
+    def _on_copy_rhythm(self, icon=None, item=None) -> None:
+        def runner() -> None:
+            try:
+                ok = sharecard.copy_to_clipboard(self._build_rhythm_card())
+                self._notify("昨日节奏图已复制到剪贴板。" if ok else "复制失败，请改用“保存昨日节奏图”。")
+            except Exception as exc:
+                collector.log_error(exc)
+                self._notify("生成节奏图失败，请稍后再试。")
+
+        threading.Thread(target=runner, daemon=True).start()
+
+    def _on_save_rhythm(self, icon=None, item=None) -> None:
+        def runner() -> None:
+            try:
+                img = self._build_rhythm_card()
+            except Exception as exc:
+                collector.log_error(exc)
+                self._notify("生成节奏图失败，请稍后再试。")
+                return
+            path = self._ask_save_path(sharecard.default_filename("rhythm"), title="保存昨日节奏图")
+            if not path:
+                return
+            try:
+                sharecard.save_card(img, path)
+                self._notify(f"已保存：{path}")
+                self._reveal(path)
+            except Exception as exc:
+                collector.log_error(exc)
+                self._notify("保存节奏图失败，请稍后再试。")
+
+        threading.Thread(target=runner, daemon=True).start()
+
     @staticmethod
-    def _ask_save_path(default_name: str) -> str | None:
+    def _ask_save_path(default_name: str, title: str = "保存今日截图") -> str | None:
         import os
         import tkinter as tk
         from tkinter import filedialog
@@ -216,7 +256,7 @@ class TokenStepTray:
             pass
         path = filedialog.asksaveasfilename(
             parent=root,
-            title="保存今日截图",
+            title=title,
             defaultextension=".png",
             initialfile=default_name,
             initialdir=initial_dir,

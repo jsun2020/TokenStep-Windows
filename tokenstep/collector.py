@@ -1137,6 +1137,213 @@ def aggregate(records: list[dict[str, Any]], pricing: dict[str, Any]) -> dict[st
     }
 
 
+# ---------------------------------------------------------------------------
+# Daily rhythm (hourly token buckets + pattern classification)
+# Ported from macOS 0.1.42 (RhythmAccumulator / DailyRhythm / RhythmTag) so the
+# Windows share card can render the "昨日 AI 节奏" view. Pure arithmetic over the
+# per-record local timestamps already collected; no new data source.
+# ---------------------------------------------------------------------------
+
+RHYTHM_TITLES = {
+    "early_starter": "清晨启动型",
+    "morning_planner": "上午规划型",
+    "afternoon_burst": "下午爆发型",
+    "evening_sprint": "晚间冲刺型",
+    "night_agent": "夜间 Agent 型",
+    "double_peak": "双峰推进型",
+    "fragmented": "碎片推进型",
+    "one_shot": "一波流型",
+    "steady_cruise": "稳定巡航型",
+    "quiet_day": "低频轻触型",
+}
+
+RHYTHM_SHARE_LINES = {
+    "early_starter": "一早就把 AI 拉进工作台",
+    "morning_planner": "上午定方向，后面稳稳推进",
+    "afternoon_burst": "午后能量拉满，一段时间集中爆发",
+    "evening_sprint": "晚间突然加速，把任务向前顶了一截",
+    "night_agent": "夜里交给 Agent，把任务往前推",
+    "double_peak": "一天两次拉满，节奏很有层次",
+    "fragmented": "多时段穿插推进，随手就把活干了",
+    "one_shot": "集中一波解决主要战斗",
+    "steady_cruise": "稳定巡航，没有明显掉线",
+    "quiet_day": "轻量使用，保留一点 AI 手感",
+}
+
+
+def hour_from_iso(ts: str | None) -> int | None:
+    parsed = parse_iso(ts)
+    return parsed.hour if parsed else None
+
+
+def _rhythm_threshold(total: int, peak: int) -> int:
+    if total <= 0:
+        return 1
+    return max(1, int(round(max(total * 0.03, peak * 0.30))))
+
+
+def _rhythm_sum(hourly: list[int], hours) -> int:
+    return sum(hourly[h] for h in hours if 0 <= h < len(hourly))
+
+
+def _rhythm_share(value: int, total: int) -> float:
+    return (value / total) if total > 0 else 0.0
+
+
+def _rhythm_local_peaks(hourly: list[int]) -> list[tuple[int, int]]:
+    peaks = []
+    for h, tokens in enumerate(hourly):
+        if tokens <= 0:
+            continue
+        prev = hourly[h - 1] if h > 0 else 0
+        nxt = hourly[h + 1] if h < len(hourly) - 1 else 0
+        if tokens >= prev and tokens >= nxt:
+            peaks.append((h, tokens))
+    return peaks
+
+
+def _rhythm_is_double_peak(significant: list[int], peak_tokens: int) -> bool:
+    if peak_tokens <= 0:
+        return False
+    candidates = [p for p in _rhythm_local_peaks(significant) if p[1] >= peak_tokens * 0.45]
+    candidates.sort(key=lambda p: p[1], reverse=True)
+    candidates = candidates[:5]
+    for left in candidates:
+        for right in candidates:
+            if abs(left[0] - right[0]) >= 4:
+                return True
+    return False
+
+
+def _rhythm_classify(
+    hourly: list[int],
+    significant: list[int],
+    total: int,
+    peak_hour: int | None,
+    peak_tokens: int,
+    active_hours: int,
+    first_active_hour: int | None,
+) -> str:
+    if total <= 0:
+        return "quiet_day"
+    peak_share = _rhythm_share(peak_tokens, total)
+    if _rhythm_is_double_peak(significant, peak_tokens):
+        return "double_peak"
+    if peak_share >= 0.50:
+        return "one_shot"
+
+    night_share = _rhythm_share(_rhythm_sum(significant, [21, 22, 23, 0, 1, 2]), total)
+    if night_share >= 0.35 or (
+        peak_hour is not None and (peak_hour >= 21 or peak_hour <= 2) and night_share >= 0.25
+    ):
+        return "night_agent"
+
+    evening_share = _rhythm_share(_rhythm_sum(significant, [19, 20]), total)
+    if (peak_hour is not None and 19 <= peak_hour <= 20) or evening_share >= 0.30:
+        return "evening_sprint"
+
+    afternoon_share = _rhythm_share(_rhythm_sum(significant, range(14, 19)), total)
+    if afternoon_share >= 0.35 or (
+        peak_hour is not None and 14 <= peak_hour <= 18 and afternoon_share >= 0.25
+    ):
+        return "afternoon_burst"
+
+    early_share = _rhythm_share(_rhythm_sum(significant, range(5, 10)), total)
+    if first_active_hour is not None and first_active_hour <= 8 and early_share >= 0.25:
+        return "early_starter"
+
+    morning_share = _rhythm_share(_rhythm_sum(significant, range(8, 13)), total)
+    if morning_share >= 0.35 or (
+        peak_hour is not None and 8 <= peak_hour <= 12 and morning_share >= 0.25
+    ):
+        return "morning_planner"
+
+    if active_hours >= 6 and peak_share < 0.35:
+        return "fragmented"
+    if active_hours >= 4:
+        return "steady_cruise"
+    return "quiet_day"
+
+
+def compute_daily_rhythm(date: str, hourly: list[int]) -> dict[str, Any]:
+    """Build a DailyRhythm-equivalent dict from a 24-slot hourly token list."""
+    hourly = [int(t) for t in hourly]
+    total = sum(hourly)
+    peak_tokens = max(hourly) if hourly else 0
+    # Earliest hour holding the max (matches Swift max(by:) tie-break -> lowest offset).
+    peak_hour = hourly.index(peak_tokens) if peak_tokens > 0 else None
+    threshold = _rhythm_threshold(total, peak_tokens)
+    significant = [t if t >= threshold else 0 for t in hourly]
+    active_hours = sum(1 for t in significant if t > 0)
+    first_active = next((h for h, t in enumerate(significant) if t > 0), None)
+    last_active = next((h for h in range(len(significant) - 1, -1, -1) if significant[h] > 0), None)
+    primary = _rhythm_classify(
+        hourly, significant, total, peak_hour, peak_tokens, active_hours, first_active
+    )
+    # Displayed 夜间占比 uses RAW buckets 21-23 + 0-2 (matches ShareRhythmCardView.nightShare,
+    # which differs from the classifier's significant-bucket night window).
+    night_tokens = _rhythm_sum(hourly, [21, 22, 23]) + _rhythm_sum(hourly, [0, 1, 2])
+    night_share = _rhythm_share(night_tokens, total)
+    # Longest run of consecutive significant hours (matches view longestActiveStreak).
+    best = cur = 0
+    for t in significant:
+        if t > 0:
+            cur += 1
+            best = max(best, cur)
+        else:
+            cur = 0
+    longest_streak = max(best, 1 if active_hours > 0 else 0)
+    return {
+        "date": date,
+        "buckets": hourly,
+        "total_tokens": total,
+        "peak_hour": peak_hour,
+        "peak_tokens": peak_tokens,
+        "active_hours": active_hours,
+        "first_active_hour": first_active,
+        "last_active_hour": last_active,
+        "primary_tag": primary,
+        "title": RHYTHM_TITLES[primary],
+        "share_line": RHYTHM_SHARE_LINES[primary],
+        "night_share": night_share,
+        "longest_streak": longest_streak,
+    }
+
+
+def compute_rhythms(records: list[dict[str, Any]], keep_days: int = 14) -> list[dict[str, Any]]:
+    """Per-date hourly rhythms from collected records (keeps the most recent N days)."""
+    by_date: dict[str, list[int]] = {}
+    for record in records:
+        hour = hour_from_iso(record.get("timestamp"))
+        if hour is None or not (0 <= hour < 24):
+            continue
+        date = record.get("date")
+        if not date:
+            continue
+        tokens = int(record.get("usage", {}).get("total_tokens", 0) or 0)
+        if tokens <= 0:
+            continue
+        by_date.setdefault(date, [0] * 24)[hour] += tokens
+    rhythms = [compute_daily_rhythm(d, by_date[d]) for d in sorted(by_date)]
+    if keep_days:
+        rhythms = rhythms[-keep_days:]
+    return rhythms
+
+
+def rhythm_for(snapshot: dict[str, Any], date: str) -> dict[str, Any] | None:
+    for r in snapshot.get("rhythms") or []:
+        if r.get("date") == date:
+            return r
+    return None
+
+
+def yesterday_rhythm(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Yesterday's rhythm, or an empty quiet-day rhythm so the card still renders."""
+    key = (dt.datetime.now(_LOCAL_TZ).date() - dt.timedelta(days=1)).isoformat()
+    found = rhythm_for(snapshot, key)
+    return found if found else compute_daily_rhythm(key, [0] * 24)
+
+
 def collect_all(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     if settings:
         configure_timezone(settings.get("timezone"))
@@ -1166,6 +1373,7 @@ def collect_all(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     )
     cc_switch_meta = _annotate_cc_switch_meta(cc_switch_meta, dedup)
     result = aggregate(dedup["records"], pricing)
+    result["rhythms"] = compute_rhythms(dedup["records"])
     result["sources"] = {
         "Codex": codex_meta,
         "Claude Code": claude_meta,
@@ -1245,6 +1453,7 @@ def load_snapshot_safe() -> dict[str, Any]:
             "daily": [],
             "tools": [],
             "models": [],
+            "rhythms": [],
             "sources": {},
         }
 

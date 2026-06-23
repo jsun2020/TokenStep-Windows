@@ -59,9 +59,38 @@ def _screenshot_once() -> int:
     return 0
 
 
+def _rhythm_screenshot_once() -> int:
+    import os
+
+    from tokenstep import collector, paths, sharecard, settings as settings_mod
+
+    settings = settings_mod.load()
+    collector.ensure_pricing_file()
+    data = collector.collect_all(settings)
+    collector.write_outputs(data, settings)
+    rhythm = collector.yesterday_rhythm(data)
+    img = sharecard.render_rhythm_card(rhythm)
+
+    out = None
+    argv = sys.argv
+    if "--rhythm-screenshot" in argv:
+        idx = argv.index("--rhythm-screenshot")
+        if idx + 1 < len(argv) and not argv[idx + 1].startswith("-"):
+            out = argv[idx + 1]
+    if not out:
+        pictures = os.path.join(os.path.expanduser("~"), "Pictures")
+        base = pictures if os.path.isdir(pictures) else str(paths.ROOT)
+        out = os.path.join(base, sharecard.default_filename("rhythm"))
+    sharecard.save_card(img, out)
+    print(f"rhythm screenshot saved: {out}")
+    return 0
+
+
 def main() -> int:
     if "--collect" in sys.argv or "print-summary" in sys.argv:
         return _collect_once()
+    if "--rhythm-screenshot" in sys.argv:
+        return _rhythm_screenshot_once()
     if "--screenshot" in sys.argv:
         return _screenshot_once()
     from tokenstep.tray import main as tray_main
